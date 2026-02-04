@@ -1,41 +1,69 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  my-sam-app
 
-  Sample SAM Template for my-sam-app
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
 
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 3
+    Runtime: python3.12
+    Timeout: 10
+    AutoPublishAlias: live  # 关键：自动发布新版本并更新别名
 
 Resources:
   HelloWorldFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Type: AWS::Serverless::Function
     Properties:
-      CodeUri: hello_world/
+      CodeUri: src/
       Handler: app.lambda_handler
-      Runtime: python3.12
-      Architectures:
-        - x86_64
       Events:
-        HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+        Api:
+          Type: Api
           Properties:
             Path: /hello
             Method: get
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes  # 蓝绿策略（可选：Linear10PercentEvery1Minute, AllAtOnce）
+        Alarms:
+          - !Ref HelloWorldErrorsAlarm
+        Hooks:
+          PreTraffic: !GetAtt PreTrafficFunction.Arn
+          PostTraffic: !GetAtt PostTrafficFunction.Arn
 
-Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  HelloWorldApi:
-    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
-  HelloWorldFunction:
-    Description: "Hello World Lambda Function ARN"
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionIamRole:
-    Description: "Implicit IAM Role created for Hello World function"
-    Value: !GetAtt HelloWorldFunctionRole.Arn
+  # 预流量 Hook（部署前验证）
+  PreTrafficFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: hooks.pre_traffic_hook
+      Runtime: python3.12
+      Environment:
+        Variables:
+          PRIMARY_FUNCTION_VERSION: !Ref HelloWorldFunction.Version
+
+  # 后流量 Hook（部署后验证）
+  PostTrafficFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: hooks.post_traffic_hook
+      Runtime: python3.12
+
+  # CloudWatch 告警（用于自动回滚）
+  HelloWorldErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-HelloWorld-Errors"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 1
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref HelloWorldFunction
