@@ -1,0 +1,15 @@
+version = 0.1
+
+[dev.deploy.parameters]
+stack_name = "my-sam-app-dev"
+region = "ap-southeast-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+parameter_overrides = "Environment=dev"
+
+[prod.deploy.parameters]
+stack_name = "my-sam-app-prod"
+region = "ap-southeast-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+parameter_overrides = "Environment=prod"
